@@ -591,6 +591,9 @@ struct fuse_conn {
 	/** Is bmap not implemented by fs? */
 	unsigned no_bmap:1;
 
+	/** Is fiemap not implemented by fs? */
+	unsigned no_fiemap:1;
+
 	/** Is poll not implemented by fs? */
 	unsigned no_poll:1;
 

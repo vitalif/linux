@@ -2708,6 +2708,8 @@ static long fuse_file_ioctl(struct file *file, unsigned int cmd,
 static long fuse_file_compat_ioctl(struct file *file, unsigned int cmd,
 				   unsigned long arg)
 {
+	if (cmd == FS_IOC_FIEMAP)
+		return -ENOIOCTLCMD;
 	return fuse_ioctl_common(file, cmd, arg, FUSE_IOCTL_COMPAT);
 }
 

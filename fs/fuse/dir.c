@@ -1870,6 +1870,70 @@ static int fuse_removexattr(struct dentry *entry, const char *name)
 	return err;
 }
 
+static int fuse_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo, u64 start, u64 len)
+{
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_req *req;
+	struct fuse_fiemap_in in;
+	void *out = NULL;
+	int err;
+
+	if (fc->no_fiemap)
+		return -EOPNOTSUPP;
+
+	req = fuse_get_req_nopages(fc);
+	if (IS_ERR(req))
+		return PTR_ERR(req);
+
+	in.flags = fieinfo->fi_flags;
+	in.extents_max = fieinfo->fi_extents_max;
+	in.start = start;
+	in.len = len;
+
+	req->in.h.opcode = FUSE_FIEMAP;
+	req->in.h.nodeid = get_node_id(inode);
+	req->in.numargs = 1;
+	req->in.args[0].size = sizeof(struct fuse_fiemap_in);
+	req->in.args[0].value = &in;
+	req->out.numargs = 1;
+	req->out.argvar = 1;
+	req->out.args[0].size = 4 + fieinfo->fi_extents_max*sizeof(struct fuse_fiemap_extent);
+	req->out.args[0].value = out = kzalloc(req->out.args[0].size, 0);
+	if (!out) {
+		fuse_put_request(fc, req);
+		return -ENOMEM;
+	}
+	fuse_request_send(fc, req);
+	err = req->out.h.error;
+	if (!err && req->out.h.len >= sizeof(u32)) {
+		u32 extents_mapped = *((u32*)out);
+		if (in.extents_max) {
+			struct fuse_fiemap_extent *extents = (struct fuse_fiemap_extent*)(out + 4);
+			u32 i;
+			if (extents_mapped > in.extents_max) {
+				extents_mapped = in.extents_max;
+			}
+			if (extents_mapped > (req->out.h.len - 4) / sizeof(struct fuse_fiemap_extent)) {
+				extents_mapped = (req->out.h.len - 4) / sizeof(struct fuse_fiemap_extent);
+			}
+			for (i = 0; i < extents_mapped; i++) {
+				fiemap_fill_next_extent(fieinfo,
+					extents[i].logical, extents[i].physical,
+					extents[i].length, extents[i].flags);
+			}
+		} else {
+			fieinfo->fi_extents_mapped = extents_mapped;
+		}
+	}
+	fuse_put_request(fc, req);
+	kfree(out);
+	if (err == -ENOSYS) {
+		fc->no_fiemap = 1;
+		err = -EOPNOTSUPP;
+	}
+	return err;
+}
+
 static const struct inode_operations fuse_dir_inode_operations = {
 	.lookup		= fuse_lookup,
 	.mkdir		= fuse_mkdir,
@@ -1909,6 +1973,7 @@ static const struct inode_operations fuse_common_inode_operations = {
 	.getxattr	= fuse_getxattr,
 	.listxattr	= fuse_listxattr,
 	.removexattr	= fuse_removexattr,
+	.fiemap		= fuse_fiemap,
 };
 
 static const struct inode_operations fuse_symlink_inode_operations = {
